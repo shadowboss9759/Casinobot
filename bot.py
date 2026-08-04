@@ -192,9 +192,9 @@ def calculate_rigged_dice(bet_type: str, selected_val: Union[str, int]) -> int:
     win_roll = random.random() < 0.20  # 20% Chance Win
 
     if bet_type == "BIG":
-        winning_outcomes, losing_outcomes = [4, 5, 6],[1, 2, 3]
+        winning_outcomes, losing_outcomes = [4, 5, 6]
     elif bet_type == "SMALL":
-        winning_outcomes, losing_outcomes = [1, 2, 3],[4, 5, 6]
+        winning_outcomes, losing_outcomes = [1, 2, 3]
     else:
         target = int(selected_val)
         winning_outcomes = [target]
