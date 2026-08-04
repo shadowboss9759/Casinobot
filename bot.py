@@ -3,6 +3,9 @@ import random
 import logging
 import sqlite3
 from typing import Union
+from threading import Thread
+from flask import Flask
+
 from admin import register_admin_handlers, check_force_join
 
 from telegram import (
@@ -24,6 +27,29 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
+
+# ---------------------------------------------------------
+# KEEP ALIVE WEB SERVER (Render Sleep Fix For UptimeRobot)
+# ---------------------------------------------------------
+web_app = Flask('')
+
+@web_app.route('/')
+def home():
+    return "Bot is alive and running 24/7!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
+# Server start
+keep_alive()
+# ---------------------------------------------------------
+
 
 # Configuration Variables
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))  # Admin Telegram ID
