@@ -166,9 +166,9 @@ def calculate_rigged_dice(bet_type: str, selected_val: Union[str, int]) -> int:
     win_roll = random.random() < 0.20  # 20% Chance Win
 
     if bet_type == "BIG":
-        winning_outcomes, losing_outcomes = [4, 5, 6], [1, 2, 3]
+        winning_outcomes, losing_outcomes = [4, 5, 6]
     elif bet_type == "SMALL":
-        winning_outcomes, losing_outcomes = [1, 2, 3], [4, 5, 6]
+        winning_outcomes, losing_outcomes = [1, 2, 3]
     else:
         target = int(selected_val)
         winning_outcomes = [target]
@@ -237,8 +237,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "menu_dice_type":
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(text="🔴 BIG (4, 5, 6)", callback_data="play_bet_BIG"),
-             InlineKeyboardButton(text="🔵 SMALL (1, 2, 3)", callback_data="play_bet_SMALL")],
+            [InlineKeyboardButton(text="🔵 SMALL (1, 2, 3)", callback_data="play_bet_SMALL"),
+             InlineKeyboardButton(text="🔴 BIG (4, 5, 6)", callback_data="play_bet_BIG")],
             [InlineKeyboardButton(text="🔙 Back", callback_data="back_main")]
         ])
         await query.edit_message_text("🎲 Select Bet Mode:", reply_markup=kb)
