@@ -28,7 +28,7 @@ logging.basicConfig(
 )
 
 # ---------------------------------------------------------
-# 1. FIREBASE INITIALIZATION
+# 1. FIREBASE INITIALIZATION (Crash-Proof Version)
 # ---------------------------------------------------------
 FIREBASE_JSON_PATH = os.environ.get("FIREBASE_JSON_PATH", "firebase_credentials.json")
 DATABASE_URL = os.environ.get("FIREBASE_DB_URL", "https://your-firebase-db-url.firebaseio.com/")
@@ -37,13 +37,20 @@ if not firebase_admin._apps:
     if os.path.exists(FIREBASE_JSON_PATH):
         cred = credentials.Certificate(FIREBASE_JSON_PATH)
     else:
-        # If passed via environment variable string
-        fb_config = json.loads(os.environ.get("FIREBASE_CONFIG_JSON", "{}"))
-        cred = credentials.Certificate(fb_config)
+        fb_config_str = os.environ.get("FIREBASE_CONFIG_JSON")
+        if fb_config_str:
+            fb_config = json.loads(fb_config_str)
+            cred = credentials.Certificate(fb_config)
+        else:
+            raise ValueError(
+                "❌ Firebase Credentials nahi mile! Ya toh 'firebase_credentials.json' file "
+                "GitHub par upload karein ya Render me 'FIREBASE_CONFIG_JSON' environment variable set karein."
+            )
         
     firebase_admin.initialize_app(cred, {
         'databaseURL': DATABASE_URL
     })
+
 
 # Config Configs
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789")) # Apni Admin Telegram ID yahan rakhein
