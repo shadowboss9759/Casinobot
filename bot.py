@@ -189,7 +189,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 4. RIGGED GAME LOGIC (20% WIN / 80% LOSS)
 # ---------------------------------------------------------
 def calculate_rigged_dice(bet_type: str, selected_val: Union[str, int]) -> int:
-    win_roll = random.random() < 0.20  # 20% Chance Win
+    win_roll = random.random() < 0.15  # 20% Chance Win
 
     if bet_type == "BIG":
         winning_outcomes, losing_outcomes = [4, 5, 6],[1,2,3]
@@ -498,7 +498,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 is_win = True
 
             if is_win:
-                win_amt = bet_amt * 2
+                win_amt = bet_amt * 1.8
                 new_bal = update_balance(user.id, win_amt - bet_amt)
                 update_stats(user.id, True)
                 result_txt = f"🎉 *YOU WON!* (+{format_bal(win_amt)})"
