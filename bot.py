@@ -1,11 +1,8 @@
 import os
-import json
 import random
 import logging
+import sqlite3
 from typing import Union
-
-import firebase_admin
-from firebase_admin import credentials, db
 
 from telegram import (
     Update,
@@ -27,68 +24,81 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ---------------------------------------------------------
-# 1. FIREBASE INITIALIZATION (Crash-Proof Version)
-# ---------------------------------------------------------
-FIREBASE_JSON_PATH = os.environ.get("FIREBASE_JSON_PATH", "firebase_credentials.json")
-DATABASE_URL = os.environ.get("FIREBASE_DB_URL", "https://your-firebase-db-url.firebaseio.com/")
-
-if not firebase_admin._apps:
-    if os.path.exists(FIREBASE_JSON_PATH):
-        cred = credentials.Certificate(FIREBASE_JSON_PATH)
-    else:
-        fb_config_str = os.environ.get("FIREBASE_CONFIG_JSON")
-        if fb_config_str:
-            fb_config = json.loads(fb_config_str)
-            cred = credentials.Certificate(fb_config)
-        else:
-            raise ValueError(
-                "❌ Firebase Credentials nahi mile! Ya toh 'firebase_credentials.json' file "
-                "GitHub par upload karein ya Render me 'FIREBASE_CONFIG_JSON' environment variable set karein."
-            )
-        
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': DATABASE_URL
-    })
-
-
-# Config Configs
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789")) # Apni Admin Telegram ID yahan rakhein
-UPI_ID = os.environ.get("UPI_ID", "yourupi@upi")
-
-# Firebase DB References
-users_ref = db.reference('users')
-deposits_ref = db.reference('deposits')
-withdraws_ref = db.reference('withdraws')
+# Config Configs (Environment variables se ya Direct Value)
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))  # Yahan apni Admin Telegram ID daalein
+UPI_ID = os.environ.get("UPI_ID", "yourupi@upi")  # Yahan apna UPI ID daalein
 
 # ---------------------------------------------------------
-# 2. HELPER DATABASE FUNCTIONS
+# 1. IN-BUILT SQLITE DATABASE SETUP
 # ---------------------------------------------------------
+DB_FILE = "casino_bot.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    # Users Table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT,
+            balance REAL DEFAULT 500.0,
+            wins INTEGER DEFAULT 0,
+            losses INTEGER DEFAULT 0
+        )
+    ''')
+    # Requests Table (Deposit / Withdraw)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            type TEXT,
+            amount REAL,
+            details TEXT,
+            status TEXT DEFAULT 'pending'
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
 def get_user_data(user_id: int, name: str = "User"):
-    u_ref = users_ref.child(str(user_id))
-    data = u_ref.get()
-    if not data:
-        data = {
-            "name": name,
-            "balance": 500,  # Starting Signup bonus
-            "total_bet": 0,
-            "wins": 0,
-            "losses": 0
-        }
-        u_ref.set(data)
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, name, balance, wins, losses FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    if not row:
+        cursor.execute("INSERT INTO users (user_id, name, balance, wins, losses) VALUES (?, ?, 500.0, 0, 0)", (user_id, name))
+        conn.commit()
+        data = {"user_id": user_id, "name": name, "balance": 500.0, "wins": 0, "losses": 0}
+    else:
+        data = {"user_id": row[0], "name": row[1], "balance": row[2], "wins": row[3], "losses": row[4]}
+    conn.close()
     return data
 
 def update_balance(user_id: int, amount: float):
-    u_ref = users_ref.child(str(user_id))
-    curr = u_ref.child('balance').get() or 0
-    new_bal = curr + amount
-    u_ref.update({'balance': new_bal})
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amount, user_id))
+    conn.commit()
+    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+    new_bal = cursor.fetchone()[0]
+    conn.close()
     return new_bal
 
+def update_stats(user_id: int, is_win: bool):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    if is_win:
+        cursor.execute("UPDATE users SET wins = wins + 1 WHERE user_id = ?", (user_id,))
+    else:
+        cursor.execute("UPDATE users SET losses = losses + 1 WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
 # ---------------------------------------------------------
-# 3. CUSTOM UI KEYBOARDS (Inline Emoji & Custom Syntax)
+# 2. KEYBOARDS
 # ---------------------------------------------------------
-# Custom Keyboard helper simulating telegram emoji custom formatting
 def get_main_menu_keyboard():
     keyboard = [
         [
@@ -106,8 +116,7 @@ def get_main_menu_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-def get_admin_keyboard(req_id: str, req_type: str):
-    # Success & Primary action buttons for admin review
+def get_admin_keyboard(req_id: int, req_type: str):
     keyboard = [
         [
             InlineKeyboardButton(text="✅ Approve", callback_data=f"adm_app_{req_type}_{req_id}"),
@@ -117,7 +126,7 @@ def get_admin_keyboard(req_id: str, req_type: str):
     return InlineKeyboardMarkup(keyboard)
 
 # ---------------------------------------------------------
-# 4. BOT COMMAND HANDLERS
+# 3. COMMAND HANDLERS
 # ---------------------------------------------------------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -126,7 +135,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         f"👑 *Welcome to Casino Royals, {user.first_name}!*\n\n"
         f"💰 *Welcome Bonus:* `500 Coins` added to your wallet!\n\n"
-        f"Choose an option below to start playing in PM or Group:"
+        f"Choose an option below to start playing:"
     )
     
     await update.message.reply_text(
@@ -141,9 +150,14 @@ async def admin_panel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ You are not authorized to view the admin panel.")
         return
 
-    all_users = users_ref.get() or {}
-    total_users = len(all_users)
-    total_vault = sum([u.get('balance', 0) for u in all_users.values()])
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*), SUM(balance) FROM users")
+    row = cursor.fetchone()
+    conn.close()
+
+    total_users = row[0] or 0
+    total_vault = row[1] or 0.0
 
     text = (
         f"🛠 *ADMIN PANEL MANAGER*\n\n"
@@ -167,37 +181,24 @@ async def add_coins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: `/addcoins <user_id> <amount>`", parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# 5. RIGGED DICE GAME LOGIC (20% WIN / 80% LOSS)
+# 4. RIGGED GAME LOGIC (20% WIN / 80% LOSS)
 # ---------------------------------------------------------
 def calculate_rigged_dice(bet_type: str, selected_val: Union[str, int]) -> int:
-    """
-    Forces 80% loss probability and 20% win probability
-    """
-    win_roll = False
-    # 20% Chance to win
-    if random.random() < 0.20:
-        win_roll = True
+    win_roll = random.random() < 0.20  # 20% Chance Win
 
     if bet_type == "BIG":
-        # Big = 4, 5, 6
-        winning_outcomes = [4, 5, 6]
-        losing_outcomes = [1, 2, 3]
+        winning_outcomes, losing_outcomes = [4, 5, 6], [1, 2, 3]
     elif bet_type == "SMALL":
-        # Small = 1, 2, 3
-        winning_outcomes = [1, 2, 3]
-        losing_outcomes = [4, 5, 6]
-    else: # Exact Number (1 to 6)
+        winning_outcomes, losing_outcomes = [1, 2, 3], [4, 5, 6]
+    else:
         target = int(selected_val)
         winning_outcomes = [target]
         losing_outcomes = [i for i in range(1, 7) if i != target]
 
-    if win_roll:
-        return random.choice(winning_outcomes)
-    else:
-        return random.choice(losing_outcomes)
+    return random.choice(winning_outcomes) if win_roll else random.choice(losing_outcomes)
 
 # ---------------------------------------------------------
-# 6. CALLBACK QUERY HANDLERS (Inline Buttons)
+# 5. CALLBACK HANDLERS
 # ---------------------------------------------------------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -208,9 +209,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     
     u_data = get_user_data(user_id, user.first_name)
-    bal = u_data.get('balance', 0)
+    bal = u_data['balance']
 
-    # Balance Check
     if data == "action_balance":
         await query.edit_message_text(
             f"💰 *Wallet Balance:* `{bal} Coins`",
@@ -219,38 +219,34 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Profile Stats
     if data == "action_stats":
         text = (
             f"👤 *Player Profile:* {user.first_name}\n"
             f"🆔 *ID:* `{user_id}`\n"
             f"💰 *Balance:* `{bal} Coins`\n"
-            f"🟢 *Wins:* `{u_data.get('wins', 0)}` | 🔴 *Losses:* `{u_data.get('losses', 0)}`"
+            f"🟢 *Wins:* `{u_data['wins']}` | 🔴 *Losses:* `{u_data['losses']}`"
         )
         await query.edit_message_text(text, parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
         return
 
-    # Deposit Workflow
     if data == "action_deposit":
         context.user_data['state'] = 'AWAITING_DEPOSIT'
         text = (
             f"💳 *DEPOSIT MONEY*\n\n"
             f"Send money to UPI ID: `{UPI_ID}`\n\n"
-            f"📸 *Step 2:* Send payment screenshot in this chat. Admin will approve it instantly."
+            f"📸 *Step 2:* Send payment screenshot in this chat."
         )
         await query.edit_message_text(text, parse_mode="Markdown")
         return
 
-    # Withdraw Workflow
     if data == "action_withdraw":
         if bal < 100:
             await query.edit_message_text("❌ Minimum withdrawal amount is 100 Coins!", reply_markup=get_main_menu_keyboard())
             return
         context.user_data['state'] = 'AWAITING_WITHDRAW_DETAILS'
-        await query.edit_message_text("🏧 *ENTER WITHDRAWAL DETAILS*\n\nReply with your `UPI_ID Amount` (e.g., `user@upi 200`)", parse_mode="Markdown")
+        await query.edit_message_text("🏧 *ENTER WITHDRAWAL DETAILS*\n\nReply with your `UPI_ID Amount` (e.g. `user@upi 200`)", parse_mode="Markdown")
         return
 
-    # Game Menus
     if data == "menu_dice_type":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(text="🔴 BIG (4, 5, 6)", callback_data="play_bet_BIG"),
@@ -288,13 +284,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bet_type = parts[2]
         target_val = parts[3] if len(parts) > 3 else None
 
-        # Rigged Calculation
         outcome_dice = calculate_rigged_dice(bet_type, target_val)
 
-        # Send Separate Animated Dice Message
-        dice_msg = await context.bot.send_dice(chat_id=query.message.chat_id, emoji="🎲")
-        
-        # Determine Win / Loss
+        # Animated Dice
+        await context.bot.send_dice(chat_id=query.message.chat_id, emoji="🎲")
+
         is_win = False
         if bet_type == "BIG" and outcome_dice in [4, 5, 6]:
             is_win = True
@@ -303,21 +297,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif bet_type == "EXACT" and outcome_dice == int(target_val):
             is_win = True
 
-        # Force actual dice value override logically in response display
-        u_ref = users_ref.child(str(user_id))
         if is_win:
             win_amt = BET_AMOUNT * 2
-            update_balance(user_id, win_amt - BET_AMOUNT)
-            u_ref.child('wins').set((u_data.get('wins', 0)) + 1)
-            result_txt = f"🎉 *YOU WON!* (+{win_amt} Coins)\nDice Outcome matched your bet!"
+            new_bal = update_balance(user_id, win_amt - BET_AMOUNT)
+            update_stats(user_id, True)
+            result_txt = f"🎉 *YOU WON!* (+{win_amt} Coins)"
         else:
-            update_balance(user_id, -BET_AMOUNT)
-            u_ref.child('losses').set((u_data.get('losses', 0)) + 1)
-            result_txt = f"💔 *YOU LOST!* (-{BET_AMOUNT} Coins)\nDice rolled *{outcome_dice}*. Better luck next time! 🤣"
+            new_bal = update_balance(user_id, -BET_AMOUNT)
+            update_stats(user_id, False)
+            result_txt = f"💔 *YOU LOST!* (-{BET_AMOUNT} Coins) 🤣"
 
-        # Edit text after dice roll finishes
         await query.message.reply_text(
-            f"🎲 *Dice Rolled Value:* `{outcome_dice}`\n{result_txt}\n\n💰 Updated Balance: `{users_ref.child(str(user_id)).child('balance').get()} Coins`",
+            f"🎲 *Dice Rolled Value:* `{outcome_dice}`\n{result_txt}\n\n💰 Updated Balance: `{new_bal} Coins`",
             parse_mode="Markdown",
             reply_markup=get_main_menu_keyboard()
         )
@@ -326,63 +317,75 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("adm_"):
         if user_id != ADMIN_ID:
             return
-        _, action, rtype, req_id = data.split("_")
-        
-        if rtype == "dep":
-            req_data = deposits_ref.child(req_id).get()
-            if not req_data:
-                await query.edit_message_caption("❌ Request already processed.")
-                return
-            target_u = req_data['user_id']
-            if action == "app":
-                update_balance(target_u, 500) # Default deposit credit 500
-                deposits_ref.child(req_id).delete()
-                await context.bot.send_message(target_u, "✅ Your Deposit of 500 Coins has been Approved!")
-                await query.edit_message_caption("✅ Approved and Balance Credited!")
-            else:
-                deposits_ref.child(req_id).delete()
-                await context.bot.send_message(target_u, "❌ Your Deposit request was Rejected.")
-                await query.edit_message_caption("❌ Rejected!")
+        _, action, rtype, req_id_str = data.split("_")
+        req_id = int(req_id_str)
 
-        elif rtype == "wd":
-            req_data = withdraws_ref.child(req_id).get()
-            if not req_data:
-                await query.edit_message_text("❌ Request already processed.")
-                return
-            target_u = req_data['user_id']
-            amt = req_data['amount']
-            if action == "app":
-                withdraws_ref.child(req_id).delete()
-                await context.bot.send_message(target_u, f"✅ Your Withdrawal of {amt} Coins has been Processed!")
-                await query.edit_message_text(f"✅ Approved Withdrawal for `{target_u}`")
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, amount FROM requests WHERE id = ? AND status = 'pending'", (req_id,))
+        req = cursor.fetchone()
+
+        if not req:
+            await query.edit_message_caption("❌ Request already processed.") if query.message.photo else await query.edit_message_text("❌ Request already processed.")
+            conn.close()
+            return
+
+        target_u, amt = req[0], req[1]
+
+        if action == "app":
+            cursor.execute("UPDATE requests SET status = 'approved' WHERE id = ?", (req_id,))
+            conn.commit()
+            conn.close()
+            
+            if rtype == "dep":
+                update_balance(target_u, 500)  # Default 500 credit
+                await context.bot.send_message(target_u, "✅ Your Deposit of 500 Coins has been Approved!")
             else:
-                update_balance(target_u, amt) # Refund balance on reject
-                withdraws_ref.child(req_id).delete()
+                await context.bot.send_message(target_u, f"✅ Your Withdrawal of {amt} Coins has been Processed!")
+
+            if query.message.photo:
+                await query.edit_message_caption("✅ Approved!")
+            else:
+                await query.edit_message_text("✅ Approved!")
+
+        else:
+            cursor.execute("UPDATE requests SET status = 'rejected' WHERE id = ?", (req_id,))
+            conn.commit()
+            conn.close()
+
+            if rtype == "wd":
+                update_balance(target_u, amt)  # Refund
                 await context.bot.send_message(target_u, f"❌ Your Withdrawal request was Rejected. Balance Refunded!")
-                await query.edit_message_text(f"❌ Rejected Withdrawal for `{target_u}`")
+            else:
+                await context.bot.send_message(target_u, "❌ Your Deposit request was Rejected.")
+
+            if query.message.photo:
+                await query.edit_message_caption("❌ Rejected!")
+            else:
+                await query.edit_message_text("❌ Rejected!")
 
 # ---------------------------------------------------------
-# 7. MEDIA & TEXT MESSAGES (Deposit Screenshot & Withdraw Input)
+# 6. MESSAGE HANDLERS
 # ---------------------------------------------------------
 async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     state = context.user_data.get('state')
 
-    # Deposit Screenshot Handler
+    # Deposit Photo
     if state == 'AWAITING_DEPOSIT' and update.message.photo:
         photo_id = update.message.photo[-1].file_id
-        req_ref = deposits_ref.push({
-            "user_id": user.id,
-            "username": user.username,
-            "status": "pending"
-        })
-        req_id = req_ref.key
-        
-        # Send photo to admin
+
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO requests (user_id, type, amount, details) VALUES (?, 'dep', 500, 'screenshot')", (user.id,))
+        req_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
         await context.bot.send_photo(
             chat_id=ADMIN_ID,
             photo=photo_id,
-            caption=f"💳 *NEW DEPOSIT REQUEST*\nUser: {user.first_name} (`{user.id}`)\nUsername: @{user.username}",
+            caption=f"💳 *NEW DEPOSIT REQUEST*\nUser: {user.first_name} (`{user.id}`)",
             parse_mode="Markdown",
             reply_markup=get_admin_keyboard(req_id, "dep")
         )
@@ -390,27 +393,25 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Screenshot sent to Admin for approval!", reply_markup=get_main_menu_keyboard())
         return
 
-    # Withdraw Text Details Handler
+    # Withdraw Text
     if state == 'AWAITING_WITHDRAW_DETAILS' and update.message.text:
         try:
             upi_details, amt_str = update.message.text.split()
             amount = float(amt_str)
-            bal = get_user_data(user.id).get('balance', 0)
+            bal = get_user_data(user.id)['balance']
 
             if amount > bal or amount < 100:
                 await update.message.reply_text("❌ Invalid Amount or Insufficient Balance!")
                 return
 
-            # Deduct balance temporarily
             update_balance(user.id, -amount)
 
-            req_ref = withdraws_ref.push({
-                "user_id": user.id,
-                "amount": amount,
-                "upi": upi_details,
-                "status": "pending"
-            })
-            req_id = req_ref.key
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO requests (user_id, type, amount, details) VALUES (?, 'wd', ?, ?)", (user.id, amount, upi_details))
+            req_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
 
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
@@ -421,10 +422,10 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['state'] = None
             await update.message.reply_text("✅ Withdrawal Request Sent to Admin!", reply_markup=get_main_menu_keyboard())
         except Exception:
-            await update.message.reply_text("❌ Invalid Format! Send like this: `yourupi@upi 200`", parse_mode="Markdown")
+            await update.message.reply_text("❌ Send details like this: `yourupi@upi 200`", parse_mode="Markdown")
 
 # ---------------------------------------------------------
-# 8. APPLICATION ENTRYPOINT
+# 7. MAIN ENTRYPOINT
 # ---------------------------------------------------------
 if __name__ == '__main__':
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -433,12 +434,11 @@ if __name__ == '__main__':
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Handlers
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("admin", admin_panel_cmd))
     app.add_handler(CommandHandler("addcoins", add_coins_cmd))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_messages))
 
-    print("⚡ Casino Royalty Rigged Bot Started Successfully...")
+    print("⚡ Bot chal raha hai bina kisi Firebase ke...")
     app.run_polling()
