@@ -3,6 +3,7 @@ import random
 import logging
 import sqlite3
 from typing import Union
+from admin import register_admin_handlers, check_force_join
 
 from telegram import (
     Update,
