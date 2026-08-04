@@ -460,7 +460,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             outcome_dice = calculate_rigged_dice(bet_type, target_val)
 
             # Animated Dice Roll
-            await context.bot.send_dice(chat_id=update.effective_chat.id, emoji="🎲")
+           # await context.bot.send_dice(chat_id=update.effective_chat.id, emoji="🎲")
 
             # Check Win Condition
             is_win = False
