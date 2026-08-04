@@ -142,10 +142,12 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = update.effective_user
+    
+    # Har bar fresh/real-time balance fetch hoga DB se
     u_data = get_user_data(user.id, user.first_name)
     
     welcome_text = (
-        f"👑 *Welcome to Casino Royals, {user.first_name}!*\n\n"
+        f"👑 *Welcome to Shadow Casino, {user.first_name}!*\n\n"
         f"💰 *Current Balance:* `{format_bal(u_data['balance'])}`\n\n"
         f"Choose an option below to start playing:"
     )
@@ -155,6 +157,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         reply_markup=get_main_menu_keyboard()
     )
+
 
 # ---------------------------------------------------------
 # 4. RIGGED GAME LOGIC (20% WIN / 80% LOSS)
