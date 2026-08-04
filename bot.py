@@ -137,7 +137,7 @@ def update_stats(user_id: int, is_win: bool):
 def get_main_menu_keyboard():
     keyboard = [
         [
-            InlineKeyboardButton(text="🎲 Roll Dice (Big/Small)", callback_data="menu_dice_type","style":success),
+            InlineKeyboardButton(text="🎲 Roll Dice (Big/Small)", callback_data="menu_dice_type"),
             InlineKeyboardButton(text="🎯 Roll Exact Number", callback_data="menu_dice_exact")
         ],
         [
