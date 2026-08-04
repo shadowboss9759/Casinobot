@@ -189,29 +189,74 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------
 # ADMIN COMMAND IMPLEMENTATIONS
 # ---------------------------------------------------------
+# Helper: User ko formatted balance dikhane ke liye
+def format_bal(coins: float) -> str:
+    inr = round(coins / 100.0, 2)
+    return f"{int(coins)} Coins ({inr}₹)"
+
+# Add Coins Command (Updated)
 async def add_coins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
+    if update.effective_user.id != ADMIN_ID: 
+        return
     try:
         t_id, amt = int(context.args[0]), float(context.args[1])
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (amt, t_id))
+        cursor.execute("SELECT balance FROM users WHERE user_id = ?", (t_id,))
+        row = cursor.fetchone()
         conn.commit()
         conn.close()
-        await update.message.reply_text(f"✅ Added `{amt} Coins` (₹{coins_to_inr(amt)}) to `{t_id}`", parse_mode="Markdown")
+
+        if row:
+            new_bal = row[0]
+            # Admin ko confirmation message
+            await update.message.reply_text(f"✅ Added `{amt} Coins` to `{t_id}`.\nNew Balance: `{format_bal(new_bal)}`", parse_mode="Markdown")
+            
+            # USER KO NOTIFICATION MESSAGE
+            try:
+                await context.bot.send_message(
+                    chat_id=t_id,
+                    text=f"💳 *BALANCE CREDITED!*\n\n`+{amt} Coins` added by Admin.\n💰 Updated Balance: `{format_bal(new_bal)}`",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass  # Agar user ne bot block kiya hoga toh ignore karega
+        else:
+            await update.message.reply_text("❌ User ID not found in database!")
     except Exception:
         await update.message.reply_text("Usage: `/addcoins <user_id> <coins>`", parse_mode="Markdown")
 
+# Cut Coins Command (Updated)
 async def cut_coins_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
+    if update.effective_user.id != ADMIN_ID: 
+        return
     try:
         t_id, amt = int(context.args[0]), float(context.args[1])
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET balance = MAX(0, balance - ?) WHERE user_id = ?", (amt, t_id))
+        cursor.execute("SELECT balance FROM users WHERE user_id = ?", (t_id,))
+        row = cursor.fetchone()
         conn.commit()
         conn.close()
-        await update.message.reply_text(f"✂️ Deducted `{amt} Coins` (₹{coins_to_inr(amt)}) from `{t_id}`", parse_mode="Markdown")
+
+        if row:
+            new_bal = row[0]
+            # Admin ko confirmation message
+            await update.message.reply_text(f"✂️ Deducted `{amt} Coins` from `{t_id}`.\nNew Balance: `{format_bal(new_bal)}`", parse_mode="Markdown")
+            
+            # USER KO NOTIFICATION MESSAGE
+            try:
+                await context.bot.send_message(
+                    chat_id=t_id,
+                    text=f"⚠️ *BALANCE DEDUCTED!*\n\n`-{amt} Coins` deducted by Admin.\n💰 Updated Balance: `{format_bal(new_bal)}`",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
+        else:
+            await update.message.reply_text("❌ User ID not found in database!")
     except Exception:
         await update.message.reply_text("Usage: `/cutcoins <user_id> <coins>`", parse_mode="Markdown")
 
