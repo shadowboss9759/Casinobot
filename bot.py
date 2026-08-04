@@ -26,7 +26,7 @@ logging.basicConfig(
 
 # Config Configs (Environment variables se ya Direct Value)
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))  # Yahan apni Admin Telegram ID daalein
-UPI_ID = os.environ.get("UPI_ID", "yourupi@upi")  # Yahan apna UPI ID daalein
+UPI_ID = os.environ.get("UPI_ID", "kingdipak@fam")  # Yahan apna UPI ID daalein
 
 # ---------------------------------------------------------
 # 1. IN-BUILT SQLITE DATABASE SETUP
