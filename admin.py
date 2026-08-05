@@ -2,9 +2,10 @@ import sqlite3
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
+from bot import add_deposit_with_wager, format_bal  # Ensure this is imported
 
 DB_FILE = "casino_bot.db"
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))  # Apni Admin Telegram ID yahan daalein
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "8158560910"))  # Apni Admin Telegram ID yahan daalein
 
 # ---------------------------------------------------------
 # DATABASE INITIALIZATION FOR ADMIN & SYSTEM SETTINGS
