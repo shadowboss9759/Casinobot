@@ -1,11 +1,14 @@
-import sqlite3
 import os
+import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
-
 DB_FILE = "/data/casino_bot.db"
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8158560910"))  # Apni Admin Telegram ID yahan daalein
+
+# Auto-create /data folder if missing
+if os.path.dirname(DB_FILE):
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
 
 # ---------------------------------------------------------
 # DATABASE INITIALIZATION FOR ADMIN & SYSTEM SETTINGS
@@ -29,6 +32,30 @@ def init_admin_db():
         )
     ''')
 
+    # Users Table (Fail-safe)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            name TEXT,
+            balance REAL DEFAULT 0.0,
+            wins INTEGER DEFAULT 0,
+            losses INTEGER DEFAULT 0,
+            wager_required REAL DEFAULT 0.0,
+            wager_done REAL DEFAULT 0.0
+        )
+    ''')
+
+    # Requests Table (Fail-safe)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            amount REAL,
+            type TEXT,
+            status TEXT
+        )
+    ''')
+
     # Default Settings Insert
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('bot_status', 'ON')")
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('force_channel', '')")
@@ -42,12 +69,15 @@ init_admin_db()
 # HELPER FUNCTIONS
 # ---------------------------------------------------------
 def get_setting(key: str) -> str:
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
-    row = cursor.fetchone()
-    conn.close()
-    return row[0] if row else ""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else ""
+    except Exception:
+        return ""
 
 def set_setting(key: str, value: str):
     conn = sqlite3.connect(DB_FILE)
@@ -57,18 +87,21 @@ def set_setting(key: str, value: str):
     conn.close()
 
 def is_user_banned(user_id: int) -> bool:
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM banned_users WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return row is not None
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM banned_users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return row is not None
+    except Exception:
+        return False
 
 def coins_to_inr(coins: float) -> float:
     return round(coins / 100.0, 2)  # 100 Coins = 1 INR
 
 # ---------------------------------------------------------
-# FORCE JOIN CHECKER (Aapke har user handler me call hoga)
+# FORCE JOIN CHECKER
 # ---------------------------------------------------------
 async def check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user_id = update.effective_user.id
@@ -116,76 +149,93 @@ async def check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_ID:
-        await update.message.reply_text("⛔ Authorized Admin Access Only!")
+        if update.callback_query:
+            await update.callback_query.answer("⛔ Authorized Admin Access Only!", show_alert=True)
+        else:
+            await update.message.reply_text("⛔ Authorized Admin Access Only!")
         return
 
     bot_status = get_setting("bot_status")
     channel = get_setting("force_channel") or "Not Set"
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
 
-    # User Stats
-    cursor.execute("SELECT COUNT(*), SUM(balance), SUM(wins), SUM(losses) FROM users")
-    u_stats = cursor.fetchone()
-    total_users = u_stats[0] or 0
-    total_coins = u_stats[1] or 0.0
-    total_wins = u_stats[2] or 0
-    total_losses = u_stats[3] or 0
+        # User Stats
+        cursor.execute("SELECT COUNT(*), SUM(balance), SUM(wins), SUM(losses) FROM users")
+        u_stats = cursor.fetchone()
+        total_users = u_stats[0] if u_stats and u_stats[0] else 0
+        total_coins = u_stats[1] if u_stats and u_stats[1] else 0.0
+        total_wins = u_stats[2] if u_stats and u_stats[2] else 0
+        total_losses = u_stats[3] if u_stats and u_stats[3] else 0
 
-    cursor.execute("SELECT COUNT(*) FROM banned_users")
-    banned_count = cursor.fetchone()[0] or 0
+        cursor.execute("SELECT COUNT(*) FROM banned_users")
+        banned_row = cursor.fetchone()
+        banned_count = banned_row[0] if banned_row else 0
 
-    # Financial Stats (Requests Table)
-    cursor.execute("SELECT SUM(amount) FROM requests WHERE type='dep' AND status='approved'")
-    tot_dep = cursor.fetchone()[0] or 0.0
+        # Financial Stats (Requests Table)
+        cursor.execute("SELECT SUM(amount) FROM requests WHERE type='dep' AND status='approved'")
+        row = cursor.fetchone()
+        tot_dep = row[0] if row and row[0] else 0.0
 
-    cursor.execute("SELECT SUM(amount) FROM requests WHERE type='dep' AND status='pending'")
-    pend_dep = cursor.fetchone()[0] or 0.0
+        cursor.execute("SELECT SUM(amount) FROM requests WHERE type='dep' AND status='pending'")
+        row = cursor.fetchone()
+        pend_dep = row[0] if row and row[0] else 0.0
 
-    cursor.execute("SELECT SUM(amount) FROM requests WHERE type='wd' AND status='approved'")
-    tot_wd = cursor.fetchone()[0] or 0.0
+        cursor.execute("SELECT SUM(amount) FROM requests WHERE type='wd' AND status='approved'")
+        row = cursor.fetchone()
+        tot_wd = row[0] if row and row[0] else 0.0
 
-    cursor.execute("SELECT SUM(amount) FROM requests WHERE type='wd' AND status='pending'")
-    pend_wd = cursor.fetchone()[0] or 0.0
+        cursor.execute("SELECT SUM(amount) FROM requests WHERE type='wd' AND status='pending'")
+        row = cursor.fetchone()
+        pend_wd = row[0] if row and row[0] else 0.0
 
-    conn.close()
+        conn.close()
 
-    admin_text = (
-        f"⚙️ *ADMIN CONTROL PANEL*\n\n"
-        f"🤖 *Bot Status:* `{bot_status}`\n"
-        f"📢 *Force Channel:* `{channel}`\n\n"
-        f"👥 *USERS STATS*\n"
-        f"• Total Users: `{total_users}`\n"
-        f"• Banned Users: `{banned_count}`\n"
-        f"• Total User Balance: `{total_coins} Coins` (₹{coins_to_inr(total_coins)})\n\n"
-        f"🎮 *GAME STATS*\n"
-        f"• Total Wins: `{total_wins}` | Total Losses: `{total_losses}`\n\n"
-        f"💳 *FINANCE STATS*\n"
-        f"• Total Deposits: `{tot_dep} Coins` (₹{coins_to_inr(tot_dep)})\n"
-        f"• Pending Deposits: `{pend_dep} Coins` (₹{coins_to_inr(pend_dep)})\n"
-        f"• Total Withdrawals: `{tot_wd} Coins` (₹{coins_to_inr(tot_wd)})\n"
-        f"• Pending Withdrawals: `{pend_wd} Coins` (₹{coins_to_inr(pend_wd)})\n\n"
-        f"📌 *COMMANDS LIST:*\n"
-        f"`/addcoins <id> <coins>` - Add Balance\n"
-        f"`/cutcoins <id> <coins>` - Cut Balance\n"
-        f"`/ban <id>` - Ban User\n"
-        f"`/unban <id>` - Unban User\n"
-        f"`/user <id>` - Get Full User Details\n"
-        f"`/setchannel <@username>` - Set Force Channel\n"
-        f"`/boton` - Turn Bot ON\n"
-        f"`/botoff` - Turn Bot OFF"
-    )
+        admin_text = (
+            f"⚙️ *ADMIN CONTROL PANEL*\n\n"
+            f"🤖 *Bot Status:* `{bot_status}`\n"
+            f"📢 *Force Channel:* `{channel}`\n\n"
+            f"👥 *USERS STATS*\n"
+            f"• Total Users: `{total_users}`\n"
+            f"• Banned Users: `{banned_count}`\n"
+            f"• Total User Balance: `{total_coins} Coins` (₹{coins_to_inr(total_coins)})\n\n"
+            f"🎮 *GAME STATS*\n"
+            f"• Total Wins: `{total_wins}` | Total Losses: `{total_losses}`\n\n"
+            f"💳 *FINANCE STATS*\n"
+            f"• Total Deposits: `{tot_dep} Coins` (₹{coins_to_inr(tot_dep)})\n"
+            f"• Pending Deposits: `{pend_dep} Coins` (₹{coins_to_inr(pend_dep)})\n"
+            f"• Total Withdrawals: `{tot_wd} Coins` (₹{coins_to_inr(tot_wd)})\n"
+            f"• Pending Withdrawals: `{pend_wd} Coins` (₹{coins_to_inr(pend_wd)})\n\n"
+            f"📌 *COMMANDS LIST:*\n"
+            f"`/addcoins <id> <coins>` - Add Balance\n"
+            f"`/cutcoins <id> <coins>` - Cut Balance\n"
+            f"`/ban <id>` - Ban User\n"
+            f"`/unban <id>` - Unban User\n"
+            f"`/user <id>` - Get Full User Details\n"
+            f"`/setchannel <@username>` - Set Force Channel\n"
+            f"`/boton` - Turn Bot ON\n"
+            f"`/botoff` - Turn Bot OFF"
+        )
 
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=f"🟢 Turn OFF Bot" if bot_status == "ON" else "🔴 Turn ON Bot", callback_data="toggle_bot_status")],
-        [InlineKeyboardButton(text="🔄 Refresh Dashboard", callback_data="admin_refresh")]
-    ])
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(text="🟢 Turn OFF Bot" if bot_status == "ON" else "🔴 Turn ON Bot", callback_data="toggle_bot_status")],
+            [InlineKeyboardButton(text="🔄 Refresh Dashboard", callback_data="admin_refresh")]
+        ])
 
-    if update.callback_query:
-        await update.callback_query.edit_message_text(admin_text, parse_mode="Markdown", reply_markup=kb)
-    else:
-        await update.message.reply_text(admin_text, parse_mode="Markdown", reply_markup=kb)
+        if update.callback_query:
+            await update.callback_query.edit_message_text(admin_text, parse_mode="Markdown", reply_markup=kb)
+        else:
+            await update.message.reply_text(admin_text, parse_mode="Markdown", reply_markup=kb)
+
+    except Exception as e:
+        err_msg = f"⚠️ *Admin Command Error:* `{str(e)}`"
+        if update.callback_query:
+            await update.callback_query.message.reply_text(err_msg, parse_mode="Markdown")
+        elif update.message:
+            await update.message.reply_text(err_msg, parse_mode="Markdown")
+
 
 # ---------------------------------------------------------
 # ADMIN COMMAND IMPLEMENTATIONS
