@@ -7,6 +7,7 @@ from threading import Thread
 from flask import Flask
 
 from admin import register_admin_handlers, check_force_join
+from admin import broadcast_cmd  # Import karein top par
 
 from telegram import (
     Update,
@@ -531,7 +532,8 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_messages))
-
+    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+    
     # Register Admin Handlers (Sabse last me)
     register_admin_handlers(app)
 
