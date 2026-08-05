@@ -78,9 +78,22 @@ def init_db():
             name TEXT,
             balance REAL DEFAULT 0.0,
             wins INTEGER DEFAULT 0,
-            losses INTEGER DEFAULT 0
+            losses INTEGER DEFAULT 0,
+            wager_required REAL DEFAULT 0.0,
+            wager_done REAL DEFAULT 0.0
         )
     ''')
+    
+    # Check if columns exist for existing users (Data Safe keeping)
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN wager_required REAL DEFAULT 0.0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN wager_done REAL DEFAULT 0.0")
+    except sqlite3.OperationalError:
+        pass
+
     # Requests Table (Deposit / Withdraw)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS requests (
@@ -100,15 +113,36 @@ init_db()
 def get_user_data(user_id: int, name: str = "User"):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id, name, balance, wins, losses FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT user_id, name, balance, wins, losses, wager_required, wager_done FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if not row:
-        # NO SIGNUP BONUS (Default 0.0 Balance)
-        cursor.execute("INSERT INTO users (user_id, name, balance, wins, losses) VALUES (?, ?, 0.0, 0, 0)", (user_id, name))
+        # NEW USER BONUS: 100 Coins Bonus & 500 Coins (5x) Wager
+        initial_bal = 100.0
+        initial_wager_req = 500.0  # 100 * 5
+        cursor.execute(
+            "INSERT INTO users (user_id, name, balance, wins, losses, wager_required, wager_done) VALUES (?, ?, ?, 0, 0, ?, 0.0)", 
+            (user_id, name, initial_bal, initial_wager_req)
+        )
         conn.commit()
-        data = {"user_id": user_id, "name": name, "balance": 0.0, "wins": 0, "losses": 0}
+        data = {
+            "user_id": user_id, 
+            "name": name, 
+            "balance": initial_bal, 
+            "wins": 0, 
+            "losses": 0,
+            "wager_required": initial_wager_req,
+            "wager_done": 0.0
+        }
     else:
-        data = {"user_id": row[0], "name": row[1], "balance": row[2], "wins": row[3], "losses": row[4]}
+        data = {
+            "user_id": row[0], 
+            "name": row[1], 
+            "balance": row[2], 
+            "wins": row[3], 
+            "losses": row[4],
+            "wager_required": row[5] if len(row) > 5 and row[5] is not None else 0.0,
+            "wager_done": row[6] if len(row) > 6 and row[6] is not None else 0.0
+        }
     conn.close()
     return data
 
