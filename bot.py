@@ -849,7 +849,7 @@ if __name__ == '__main__':
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN environment variable not set!")
 
-     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # 1. Base Commands
     app.add_handler(CommandHandler("start", start_cmd))
@@ -866,7 +866,6 @@ if __name__ == '__main__':
 
     # 5. Register Admin Handlers (Isse /admin Command aur Admin Panel chalega!)
     register_admin_handlers(app)
-
 
     print("⚡ Bot successfully started with all requested fixes...")
     app.run_polling()
