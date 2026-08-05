@@ -142,6 +142,10 @@ def get_main_menu_keyboard():
             InlineKeyboardButton(text="🎯 Roll Exact Number", callback_data="menu_dice_exact")
         ],
         [
+            InlineKeyboardButton(text="🪙 Head & Tail", callback_data="menu_ht_type"),
+            InlineKeyboardButton(text="🎰 Slot Machine", callback_data="menu_slot_type")
+        ],
+        [
             InlineKeyboardButton(text="💳 Deposit Cash", callback_data="action_deposit"),
             InlineKeyboardButton(text="🏧 Withdraw Cash", callback_data="action_withdraw")
         ],
@@ -151,6 +155,7 @@ def get_main_menu_keyboard():
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
+
 
 def get_admin_keyboard(req_id: int, req_type: str):
     keyboard = [
@@ -202,6 +207,24 @@ def calculate_rigged_dice(bet_type: str, selected_val: Union[str, int]) -> int:
         losing_outcomes = [i for i in range(1, 7) if i != target]
 
     return random.choice(winning_outcomes) if win_roll else random.choice(losing_outcomes)
+
+# Head/Tail Logic (20% Win)
+def calculate_rigged_ht(user_choice: str) -> str:
+    win_roll = random.random() < 0.20  # 20% Win Chance
+    if win_roll:
+        return user_choice
+    return "TAIL" if user_choice == "HEAD" else "HEAD"
+
+# Slot Machine Logic (20% Win)
+# Telegram Slot values: 1, 22, 43, 64 correspond to Jackpot 777 wins
+def calculate_rigged_slot() -> tuple[bool, int]:
+    win_roll = random.random() < 0.20
+    if win_roll:
+        return True, random.choice([1, 22, 43, 64])  # Winning slot outcomes
+    else:
+        # Non-winning outcomes
+        losing_vals = [i for i in range(1, 65) if i not in [1, 22, 43, 64]]
+        return False, random.choice(losing_vals)
 
 # ---------------------------------------------------------
 # 5. CALLBACK HANDLERS
@@ -362,6 +385,29 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await query.edit_message_text("❌ Rejected!")
 
+    # Head & Tail Menu
+    if data == "menu_ht_type":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(text="🪙 HEAD", callback_data="play_bet_HEAD"),
+             InlineKeyboardButton(text="🪙 TAIL", callback_data="play_bet_TAIL")],
+            [InlineKeyboardButton(text="🔙 Back", callback_data="back_main")]
+        ])
+        await query.edit_message_text("🪙 Choose HEAD or TAIL:", reply_markup=kb)
+        return
+
+    # Slot Machine Menu
+    if data == "menu_slot_type":
+        context.user_data['game_type'] = 'SLOT'
+        context.user_data['state'] = 'AWAITING_BET_AMOUNT'
+        await query.edit_message_text(
+            f"🎰 *SLOT MACHINE BET*\n\n"
+            f"• Min Bet: `100 Coins (1₹)`\n"
+            f"• Max Bet: `1000 Coins (10₹)`\n"
+            f"• Your Balance: `{format_bal(bal)}`",
+            parse_mode="Markdown"
+        )
+        return
+
 # ---------------------------------------------------------
 # 6. MESSAGE HANDLERS
 # ---------------------------------------------------------
@@ -467,7 +513,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Withdrawal Request Sent to Admin!", reply_markup=get_main_menu_keyboard())
         return
 
-    # 5. Dynamic Bet Processing Handler
+    # 5. Dynamic Bet Processing Handler (Dice, Head/Tail, Slot)
     if state == 'AWAITING_BET_AMOUNT' and update.message.text:
         try:
             bet_amt = float(update.message.text.strip())
@@ -484,22 +530,37 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bet_type = context.user_data.get('game_type')
             target_val = context.user_data.get('game_target')
 
-            outcome_dice = calculate_rigged_dice(bet_type, target_val)
-
-            # Animated Dice Roll
-           # await context.bot.send_dice(chat_id=update.effective_chat.id, emoji="🎲")
-
-            # Check Win Condition
             is_win = False
-            if bet_type == "BIG" and outcome_dice in [4, 5, 6]:
-                is_win = True
-            elif bet_type == "SMALL" and outcome_dice in [1, 2, 3]:
-                is_win = True
-            elif bet_type == "EXACT" and outcome_dice == int(target_val):
-                is_win = True
+            result_display = ""
 
+            # ----------------- HEAD & TAIL -----------------
+            if bet_type in ["HEAD", "TAIL"]:
+                outcome_ht = calculate_rigged_ht(bet_type)
+                if outcome_ht == bet_type:
+                    is_win = True
+                result_display = f"🪙 Coin Result: *{outcome_ht}*"
+
+            # ----------------- SLOT MACHINE -----------------
+            elif bet_type == "SLOT":
+                is_win, slot_val = calculate_rigged_slot()
+                # Slot Machine animation send karein
+                await context.bot.send_dice(chat_id=update.effective_chat.id, emoji="🎰")
+                result_display = "🎰 Slot Machine Rolled!"
+
+            # ----------------- DICE GAME -----------------
+            else:
+                outcome_dice = calculate_rigged_dice(bet_type, target_val)
+                result_display = f"🎲 Dice Rolled Value: `{outcome_dice}`"
+                if bet_type == "BIG" and outcome_dice in [4, 5, 6]:
+                    is_win = True
+                elif bet_type == "SMALL" and outcome_dice in [1, 2, 3]:
+                    is_win = True
+                elif bet_type == "EXACT" and outcome_dice == int(target_val):
+                    is_win = True
+
+            # Process Win/Loss
             if is_win:
-                win_amt = bet_amt * 1.8
+                win_amt = bet_amt * 2
                 new_bal = update_balance(user.id, win_amt - bet_amt)
                 update_stats(user.id, True)
                 result_txt = f"🎉 *YOU WON!* (+{format_bal(win_amt)})"
@@ -511,13 +572,14 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
 
             await update.message.reply_text(
-                f"🎲 *Dice Rolled Value:* `{outcome_dice}`\n{result_txt}\n\n💰 Updated Balance: `{format_bal(new_bal)}`",
+                f"{result_display}\n{result_txt}\n\n💰 Updated Balance: `{format_bal(new_bal)}`",
                 parse_mode="Markdown",
                 reply_markup=get_main_menu_keyboard()
             )
         except ValueError:
             await update.message.reply_text("❌ Valid number daalein (e.g. 100)!")
         return
+
 
 # ---------------------------------------------------------
 # 7. MAIN ENTRYPOINT
