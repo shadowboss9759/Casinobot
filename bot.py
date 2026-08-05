@@ -851,13 +851,13 @@ if __name__ == '__main__':
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    # Commands Register
     app.add_handler(CommandHandler("start", start_cmd))
+    app.add_handler(CommandHandler("admin", broadcast_cmd))  # <-- Yahan /admin handler add karein
+
+    # Callback & Message Handlers
     app.add_handler(CallbackQueryHandler(callback_handler))
-
-    # 1. PHOTO HANDLER (Withdrawal Screenshot ke liye) - PHOTO pehle aayega
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-    # 2. TEXT HANDLER (Normal message/Amount/UPI ke liye) - TEXT alag aayega
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
 
     
