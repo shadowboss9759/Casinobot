@@ -8,6 +8,7 @@ from flask import Flask
 
 from admin import register_admin_handlers, check_force_join
 from admin import broadcast_cmd  # Import karein top par
+from bot import add_deposit_with_wager, format_bal  # Ensure this is imported
 
 from telegram import (
     Update,
