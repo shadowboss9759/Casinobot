@@ -4,7 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 
 
-DB_FILE = "casino_bot.db"
+DB_FILE = "/data/casino_bot.db"
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8158560910"))  # Apni Admin Telegram ID yahan daalein
 
 # ---------------------------------------------------------
