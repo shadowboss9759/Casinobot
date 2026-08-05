@@ -67,6 +67,8 @@ def format_bal(coins: float) -> str:
 # ---------------------------------------------------------
 DB_FILE = "/data/casino_bot.db"
 
+# Ensure /data directory exists before creating DB
+os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
 
 # Group / Channel ID jahan automatic screenshots jayenge (Apna Channel ID yahan daalein)
 PROOF_CHANNEL_ID = int(os.environ.get("PROOF_CHANNEL_ID", "-1003580731079"))
