@@ -690,32 +690,68 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 4. Withdraw Step 2: Input UPI ID
     if state == 'AWAITING_WD_UPI' and update.message.text:
         upi_details = update.message.text.strip()
-        amt = context.user_data.get('wd_amount', 1000.0)
-        bal = get_user_data(user.id)['balance']
+        amt = context.user_data.get('wd_amount', 100.0)
+        u_data = get_user_data(user.id)
+        bal = u_data['balance']
 
         if amt > bal:
             await update.message.reply_text("❌ Insufficient balance!")
             context.user_data.clear()
             return
 
-        # Deduct balance temporarily
-        update_balance(user.id, -amt)
+        try:
+            # Deduct balance temporarily
+            update_balance(user.id, -amt)
 
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO requests (user_id, type, amount, details) VALUES (?, 'wd', ?, ?)", (user.id, amt, upi_details))
-        req_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
 
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"🏧 *NEW WITHDRAWAL REQUEST*\nUser: `{user.id}`\nAmount: `{format_bal(amt)}`\nUPI ID: `{upi_details}`",
-            parse_mode="Markdown",
-            reply_markup=get_admin_keyboard(req_id, "wd")
-        )
-        context.user_data.clear()
-        await update.message.reply_text("✅ Withdrawal Request Sent to Admin!", reply_markup=get_main_menu_keyboard())
+            # Fail-safe: Missing columns check & add
+            try:
+                cursor.execute("ALTER TABLE requests ADD COLUMN details TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            try:
+                cursor.execute("ALTER TABLE requests ADD COLUMN status TEXT DEFAULT 'pending'")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            cursor.execute(
+                "INSERT INTO requests (user_id, type, amount, details, status) VALUES (?, 'wd', ?, ?, 'pending')",
+                (user.id, amt, upi_details)
+            )
+            req_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+
+            # Inline keyboard for Admin approval
+            admin_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Approve", callback_data=f"adm_app_wd_{req_id}"),
+                    InlineKeyboardButton("❌ Reject", callback_data=f"adm_rej_wd_{req_id}")
+                ]
+            ])
+
+            # Send Notification to Admin
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    f"🏧 *NEW WITHDRAWAL REQUEST*\n\n"
+                    f"🆔 *User ID:* `{user.id}`\n"
+                    f"💸 *Amount:* `{format_bal(amt)}`\n"
+                    f"📲 *UPI ID:* `{upi_details}`"
+                ),
+                parse_mode="Markdown",
+                reply_markup=admin_kb
+            )
+
+            context.user_data.clear()
+            await update.message.reply_text("✅ *Withdrawal Request Sent to Admin!*", parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+
+        except Exception as e:
+            print(f"Withdrawal Error: {e}")
+            await update.message.reply_text(f"⚠️ *Withdrawal Error:* `{str(e)}`", parse_mode="Markdown")
         return
 
     # 5. Dynamic Bet Processing Handler (Dice, Head/Tail, Slot)
