@@ -731,8 +731,8 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ Insufficient Balance! Available: `{format_bal(bal)}`", parse_mode="Markdown")
                 return
 
-                    # Wager count update karein
-        update_wager_progress(user.id, bet_amt)
+            # Wager count update
+            update_wager_progress(user.id, bet_amt)
 
             bet_type = context.user_data.get('game_type')
             target_val = context.user_data.get('game_target')
