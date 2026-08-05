@@ -65,7 +65,8 @@ def format_bal(coins: float) -> str:
 # ---------------------------------------------------------
 # 1. IN-BUILT SQLITE DATABASE SETUP
 # ---------------------------------------------------------
-DB_FILE = "casino_bot.db"
+DB_FILE = "/data/casino_bot.db"
+
 
 # Group / Channel ID jahan automatic screenshots jayenge (Apna Channel ID yahan daalein)
 PROOF_CHANNEL_ID = int(os.environ.get("PROOF_CHANNEL_ID", "-1003580731079"))
