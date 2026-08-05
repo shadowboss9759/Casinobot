@@ -398,7 +398,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Admin Request Processing
     if data.startswith("adm_"):
+        # 1. SECURITY CHECK: Strictly check Admin ID
         if user_id != ADMIN_ID:
+            await query.answer("❌ Unauthorized! Only Admin can approve/reject requests.", show_alert=True)
             return
 
         _, action, rtype, req_id_str = data.split("_")
@@ -420,71 +422,66 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         target_u, amt = req[0], req[1]
 
-        # --- ACCEPT / APPROVE ACTION ---
+        # ==================== APPROVE ACTION ====================
         if action == "app":
-            # 1. DEPOSIT APPROVAL
+            # --- DEPOSIT APPROVAL ---
             if rtype == "dep":
-                # Update DB request status
                 conn = sqlite3.connect(DB_FILE)
                 cursor = conn.cursor()
                 cursor.execute("UPDATE requests SET status = 'approved' WHERE id = ?", (req_id,))
                 conn.commit()
                 conn.close()
 
-                # Add deposit + 10% bonus + wager calculation
                 total_credited, bonus_given, added_wager = add_deposit_with_wager(target_u, amt)
                 u_data = get_user_data(target_u)
 
-                # Admin Message
                 admin_txt = (
                     f"✅ *DEPOSIT APPROVED!*\n\n"
                     f"🆔 *User ID:* `{target_u}`\n"
-                    f"💵 *Deposit Amount:* `{format_bal(amt)}`\n"
+                    f"💵 *Amount:* `{format_bal(amt)}`\n"
                     f"🎁 *10% Bonus:* `{format_bal(bonus_given)}`\n"
                     f"🎯 *Wager Added:* `{added_wager:.1f} Coins`\n"
                     f"💰 *New Balance:* `{format_bal(u_data['balance'])}`\n"
                     f"⚡ *Status:* Approved"
                 )
 
-                # User Message
                 user_txt = (
                     f"🎉 *DEPOSIT APPROVED!*\n\n"
                     f"🆔 *User ID:* `{target_u}`\n"
-                    f"💵 *Deposit Amount:* `{format_bal(amt)}`\n"
-                    f"🎁 *Bonus Credited:* `{format_bal(bonus_given)}` (10%)\n"
+                    f"💵 *Amount:* `{format_bal(amt)}`\n"
+                    f"🎁 *Bonus:* `{format_bal(bonus_given)}` (10%)\n"
                     f"🎯 *Wager Added:* `{added_wager:.1f} Coins`\n"
-                    f"💰 *New Balance:* `{format_bal(u_data['balance'])}`\n\n"
-                    f"✅ *Status:* Successful! Best of Luck! 🎲"
+                    f"💰 *New Balance:* `{format_bal(u_data['balance'])}`\n"
+                    f"✅ *Status:* Successful!"
                 )
 
-                # Proof Channel Text
                 proof_txt = (
-                    f"🟢 *DEPOSIT SUCCESS PROOF* 🟢\n\n"
+                    f"🟢 *DEPOSIT APPROVED PROOF* 🟢\n\n"
                     f"🆔 *User ID:* `{target_u}`\n"
                     f"💵 *Amount Deposited:* `{format_bal(amt)}`\n"
-                    f"🎁 *Bonus:* `{format_bal(bonus_given)}`\n"
+                    f"🎁 *Bonus Credited:* `{format_bal(bonus_given)}`\n"
                     f"💰 *User Balance:* `{format_bal(u_data['balance'])}`\n"
                     f"⚡ *Status:* Approved ✅"
                 )
 
-                # Send User Notification
+                # Send User Msg
                 try:
                     await context.bot.send_message(chat_id=target_u, text=user_txt, parse_mode="Markdown")
                 except Exception:
                     pass
 
-                # Edit Admin Message & Send Photo to Proof Group
+                # Send Photo & Proof to Group
                 if query.message.photo:
                     await query.edit_message_caption(admin_txt, parse_mode="Markdown")
                     try:
                         photo_id = query.message.photo[-1].file_id
                         await context.bot.send_photo(chat_id=PROOF_CHANNEL_ID, photo=photo_id, caption=proof_txt, parse_mode="Markdown")
                     except Exception as e:
-                        print(f"Proof Channel Send Error: {e}")
+                        print(f"Group Error: {e}")
                 else:
                     await query.edit_message_text(admin_txt, parse_mode="Markdown")
 
-            # 2. WITHDRAWAL APPROVAL (Ask Admin for Screenshot)
+            # --- WITHDRAW APPROVAL (Ask Admin Screenshot) ---
             elif rtype == "wd":
                 context.user_data['admin_state'] = 'AWAITING_WD_PROOF'
                 context.user_data['wd_req_id'] = req_id
@@ -495,7 +492,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📸 *PAYMENT PROOF REQUIRED*\n\n"
                     f"🆔 *User ID:* `{target_u}`\n"
                     f"💸 *Withdraw Amount:* `{format_bal(amt)}`\n\n"
-                    f"👉 *Kripya Payment Screenshot (Photo) yahan bhejein:* User aur Proof Group me bhejney ke liye."
+                    f"👉 *Kripya Payment Screenshot (Photo) yahan bhejein:* User aur Group me bhejney ke liye."
                 )
 
                 if query.message.photo:
@@ -503,7 +500,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     await query.edit_message_text(prompt_txt, parse_mode="Markdown")
 
-        # --- REJECT ACTION ---
+        # ==================== REJECT ACTION ====================
         elif action == "rej":
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
@@ -511,23 +508,63 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
             conn.close()
 
+            # --- WITHDRAW REJECT ---
             if rtype == "wd":
-                update_balance(target_u, amt)
-                user_rej_txt = f"❌ *WITHDRAWAL REJECTED*\n\nYour request for `{format_bal(amt)}` was rejected. Coins refunded to balance."
-            else:
-                user_rej_txt = f"❌ *DEPOSIT REJECTED*\n\nYour deposit request of `{format_bal(amt)}` was rejected."
+                update_balance(target_u, amt) # Refund Coins
+                u_data = get_user_data(target_u)
 
+                user_txt = (
+                    f"❌ *WITHDRAWAL REJECTED*\n\n"
+                    f"🆔 *User ID:* `{target_u}`\n"
+                    f"💸 *Amount:* `{format_bal(amt)}`\n"
+                    f"💰 *Refunded Balance:* `{format_bal(u_data['balance'])}`\n"
+                    f"⚠️ *Status:* Rejected (Amount Credited back to balance)"
+                )
+
+                proof_txt = (
+                    f"🔴 *WITHDRAWAL REJECTED PROOF* 🔴\n\n"
+                    f"🆔 *User ID:* `{target_u}`\n"
+                    f"💸 *Requested Amount:* `{format_bal(amt)}`\n"
+                    f"⚡ *Status:* Rejected & Refunded ❌"
+                )
+
+            # --- DEPOSIT REJECT ---
+            else:
+                u_data = get_user_data(target_u)
+                user_txt = (
+                    f"❌ *DEPOSIT REJECTED*\n\n"
+                    f"🆔 *User ID:* `{target_u}`\n"
+                    f"💵 *Deposit Amount:* `{format_bal(amt)}`\n"
+                    f"💰 *Balance:* `{format_bal(u_data['balance'])}`\n"
+                    f"⚠️ *Reason:* Invalid Transaction or Payment Proof"
+                )
+
+                proof_txt = (
+                    f"🔴 *DEPOSIT REJECTED PROOF* 🔴\n\n"
+                    f"🆔 *User ID:* `{target_u}`\n"
+                    f"💵 *Attempted Amount:* `{format_bal(amt)}`\n"
+                    f"⚡ *Status:* Rejected / Invalid Payment ❌"
+                )
+
+            # Send Notification to User
             try:
-                await context.bot.send_message(chat_id=target_u, text=user_rej_txt, parse_mode="Markdown")
+                await context.bot.send_message(chat_id=target_u, text=user_txt, parse_mode="Markdown")
             except Exception:
                 pass
 
-            admin_rej_txt = f"❌ *REQUEST REJECTED*\n\nUser ID: `{target_u}` | Amount: `{format_bal(amt)}`"
+            # Send Reject Proof to Group
+            try:
+                await context.bot.send_message(chat_id=PROOF_CHANNEL_ID, text=proof_txt, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Group Reject Send Error: {e}")
+
+            admin_rej_txt = f"❌ *REQUEST REJECTED*\n\n🆔 User ID: `{target_u}` | Amount: `{format_bal(amt)}`"
             if query.message.photo:
                 await query.edit_message_caption(admin_rej_txt, parse_mode="Markdown")
             else:
                 await query.edit_message_text(admin_rej_txt, parse_mode="Markdown")
         return
+
 
 
     # Head & Tail Menu
