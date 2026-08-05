@@ -849,20 +849,24 @@ if __name__ == '__main__':
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN environment variable not set!")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Commands Register
+    # 1. Base Commands
     app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("admin", broadcast_cmd))  # <-- Yahan /admin handler add karein
+    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
 
-    # Callback & Message Handlers
+    # 2. Callbacks
     app.add_handler(CallbackQueryHandler(callback_handler))
+
+    # 3. Photo Handler (Withdrawal Proof Screenshot ke liye)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    # 4. Text Handler (Game Bets & Normal Messages ke liye)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
 
-    
-    # Register Admin Handlers (Sabse last me)
+    # 5. Register Admin Handlers (Isse /admin Command aur Admin Panel chalega!)
     register_admin_handlers(app)
+
 
     print("⚡ Bot successfully started with all requested fixes...")
     app.run_polling()
