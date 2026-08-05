@@ -367,6 +367,49 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.answer("❌ You have not joined the channel yet!", show_alert=True)
 
+#Broadcast handler
+async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    # Check agar admin ne text likha hai message me
+    if not context.args:
+        await update.message.reply_text("❌ *Usage:* `/broadcast <Aapka Message>`", parse_mode="Markdown")
+        return
+
+    broadcast_msg = " ".join(context.args)
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id FROM users")
+    users = cursor.fetchall()
+    conn.close()
+
+    total_users = len(users)
+    sent_count = 0
+    failed_count = 0
+
+    status_msg = await update.message.reply_text(f"📢 *Broadcasting message to {total_users} users...*", parse_mode="Markdown")
+
+    for user_row in users:
+        u_id = user_row[0]
+        try:
+            await context.bot.send_message(
+                chat_id=u_id,
+                text=f"📢 *ANNOUNCEMENT*\n\n{broadcast_msg}",
+                parse_mode="Markdown"
+            )
+            sent_count += 1
+            await asyncio.sleep(0.05)  # Telegram Rate Limit se bachne ke liye
+        except Exception:
+            failed_count += 1
+
+    await status_msg.edit_text(
+        f"✅ *Broadcast Completed!*\n\n"
+        f"📤 *Sent Successfully:* `{sent_count}`\n"
+        f"❌ *Failed / Blocked:* `{failed_count}`",
+        parse_mode="Markdown"
+    )
 # ---------------------------------------------------------
 # REGISTER HANDLERS FUNCTION (Main bot.py me import karne ke liye)
 # ---------------------------------------------------------
