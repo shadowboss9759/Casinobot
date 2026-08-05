@@ -851,8 +851,13 @@ if __name__ == '__main__':
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_messages))
-    app.add_handler(CommandHandler("broadcast", broadcast_cmd))
+
+    # 1. PHOTO HANDLER (Withdrawal Screenshot ke liye) - PHOTO pehle aayega
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+
+    # 2. TEXT HANDLER (Normal message/Amount/UPI ke liye) - TEXT alag aayega
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messages))
+
     
     # Register Admin Handlers (Sabse last me)
     register_admin_handlers(app)
