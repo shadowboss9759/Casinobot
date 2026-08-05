@@ -68,6 +68,9 @@ def format_bal(coins: float) -> str:
 # ---------------------------------------------------------
 DB_FILE = "casino_bot.db"
 
+# Group / Channel ID jahan automatic screenshots jayenge (Apna Channel ID yahan daalein)
+PROOF_CHANNEL_ID = int(os.environ.get("PROOF_CHANNEL_ID", "-1003580731079"))
+
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -396,6 +399,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("adm_"):
         if user_id != ADMIN_ID:
             return
+
         _, action, rtype, req_id_str = data.split("_")
         req_id = int(req_id_str)
 
@@ -403,48 +407,127 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor = conn.cursor()
         cursor.execute("SELECT user_id, amount FROM requests WHERE id = ? AND status = 'pending'", (req_id,))
         req = cursor.fetchone()
+        conn.close()
 
         if not req:
+            msg_text = "❌ Request already processed."
             if query.message.photo:
-                await query.edit_message_caption("❌ Request already processed.")
+                await query.edit_message_caption(msg_text)
             else:
-                await query.edit_message_text("❌ Request already processed.")
-            conn.close()
+                await query.edit_message_text(msg_text)
             return
 
         target_u, amt = req[0], req[1]
 
+        # --- ACCEPT / APPROVE ACTION ---
         if action == "app":
-            cursor.execute("UPDATE requests SET status = 'approved' WHERE id = ?", (req_id,))
-            conn.commit()
-            conn.close()
-            
+            # 1. DEPOSIT APPROVAL
             if rtype == "dep":
-                new_b = update_balance(target_u, amt)
-                await context.bot.send_message(target_u, f"✅ Deposit of `{format_bal(amt)}` Approved!\nUpdated Balance: `{format_bal(new_b)}`", parse_mode="Markdown")
-            else:
-                await context.bot.send_message(target_u, f"✅ Withdrawal of `{format_bal(amt)}` Processed!", parse_mode="Markdown")
+                # Update DB request status
+                conn = sqlite3.connect(DB_FILE)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE requests SET status = 'approved' WHERE id = ?", (req_id,))
+                conn.commit()
+                conn.close()
 
-            if query.message.photo:
-                await query.edit_message_caption("✅ Approved!")
-            else:
-                await query.edit_message_text("✅ Approved!")
+                # Add deposit + 10% bonus + wager calculation
+                total_credited, bonus_given, added_wager = add_deposit_with_wager(target_u, amt)
+                u_data = get_user_data(target_u)
 
-        else:
+                # Admin Message
+                admin_txt = (
+                    f"✅ *DEPOSIT APPROVED!*\n\n"
+                    f"🆔 *User ID:* `{target_u}`\n"
+                    f"💵 *Deposit Amount:* `{format_bal(amt)}`\n"
+                    f"🎁 *10% Bonus:* `{format_bal(bonus_given)}`\n"
+                    f"🎯 *Wager Added:* `{added_wager:.1f} Coins`\n"
+                    f"💰 *New Balance:* `{format_bal(u_data['balance'])}`\n"
+                    f"⚡ *Status:* Approved"
+                )
+
+                # User Message
+                user_txt = (
+                    f"🎉 *DEPOSIT APPROVED!*\n\n"
+                    f"🆔 *User ID:* `{target_u}`\n"
+                    f"💵 *Deposit Amount:* `{format_bal(amt)}`\n"
+                    f"🎁 *Bonus Credited:* `{format_bal(bonus_given)}` (10%)\n"
+                    f"🎯 *Wager Added:* `{added_wager:.1f} Coins`\n"
+                    f"💰 *New Balance:* `{format_bal(u_data['balance'])}`\n\n"
+                    f"✅ *Status:* Successful! Best of Luck! 🎲"
+                )
+
+                # Proof Channel Text
+                proof_txt = (
+                    f"🟢 *DEPOSIT SUCCESS PROOF* 🟢\n\n"
+                    f"🆔 *User ID:* `{target_u}`\n"
+                    f"💵 *Amount Deposited:* `{format_bal(amt)}`\n"
+                    f"🎁 *Bonus:* `{format_bal(bonus_given)}`\n"
+                    f"💰 *User Balance:* `{format_bal(u_data['balance'])}`\n"
+                    f"⚡ *Status:* Approved ✅"
+                )
+
+                # Send User Notification
+                try:
+                    await context.bot.send_message(chat_id=target_u, text=user_txt, parse_mode="Markdown")
+                except Exception:
+                    pass
+
+                # Edit Admin Message & Send Photo to Proof Group
+                if query.message.photo:
+                    await query.edit_message_caption(admin_txt, parse_mode="Markdown")
+                    try:
+                        photo_id = query.message.photo[-1].file_id
+                        await context.bot.send_photo(chat_id=PROOF_CHANNEL_ID, photo=photo_id, caption=proof_txt, parse_mode="Markdown")
+                    except Exception as e:
+                        print(f"Proof Channel Send Error: {e}")
+                else:
+                    await query.edit_message_text(admin_txt, parse_mode="Markdown")
+
+            # 2. WITHDRAWAL APPROVAL (Ask Admin for Screenshot)
+            elif rtype == "wd":
+                context.user_data['admin_state'] = 'AWAITING_WD_PROOF'
+                context.user_data['wd_req_id'] = req_id
+                context.user_data['wd_target_u'] = target_u
+                context.user_data['wd_amt'] = amt
+
+                prompt_txt = (
+                    f"📸 *PAYMENT PROOF REQUIRED*\n\n"
+                    f"🆔 *User ID:* `{target_u}`\n"
+                    f"💸 *Withdraw Amount:* `{format_bal(amt)}`\n\n"
+                    f"👉 *Kripya Payment Screenshot (Photo) yahan bhejein:* User aur Proof Group me bhejney ke liye."
+                )
+
+                if query.message.photo:
+                    await query.edit_message_caption(prompt_txt, parse_mode="Markdown")
+                else:
+                    await query.edit_message_text(prompt_txt, parse_mode="Markdown")
+
+        # --- REJECT ACTION ---
+        elif action == "rej":
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
             cursor.execute("UPDATE requests SET status = 'rejected' WHERE id = ?", (req_id,))
             conn.commit()
             conn.close()
 
             if rtype == "wd":
-                update_balance(target_u, amt)  # Refund
-                await context.bot.send_message(target_u, f"❌ Withdrawal request of `{format_bal(amt)}` Rejected. Balance Refunded!", parse_mode="Markdown")
+                update_balance(target_u, amt)
+                user_rej_txt = f"❌ *WITHDRAWAL REJECTED*\n\nYour request for `{format_bal(amt)}` was rejected. Coins refunded to balance."
             else:
-                await context.bot.send_message(target_u, f"❌ Deposit request of `{format_bal(amt)}` Rejected.", parse_mode="Markdown")
+                user_rej_txt = f"❌ *DEPOSIT REJECTED*\n\nYour deposit request of `{format_bal(amt)}` was rejected."
 
+            try:
+                await context.bot.send_message(chat_id=target_u, text=user_rej_txt, parse_mode="Markdown")
+            except Exception:
+                pass
+
+            admin_rej_txt = f"❌ *REQUEST REJECTED*\n\nUser ID: `{target_u}` | Amount: `{format_bal(amt)}`"
             if query.message.photo:
-                await query.edit_message_caption("❌ Rejected!")
+                await query.edit_message_caption(admin_rej_txt, parse_mode="Markdown")
             else:
-                await query.edit_message_text("❌ Rejected!")
+                await query.edit_message_text(admin_rej_txt, parse_mode="Markdown")
+        return
+
 
     # Head & Tail Menu
     if data == "menu_ht_type":
@@ -666,6 +749,58 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Valid number daalein (e.g. 100)!")
         return
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    
+    # Check if Admin is sending Withdrawal Proof Screenshot
+    if user.id == ADMIN_ID and context.user_data.get('admin_state') == 'AWAITING_WD_PROOF':
+        req_id = context.user_data.get('wd_req_id')
+        target_u = context.user_data.get('wd_target_u')
+        amt = context.user_data.get('wd_amt')
+        photo_file_id = update.message.photo[-1].file_id
+
+        # Update DB Request Status
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE requests SET status = 'approved' WHERE id = ?", (req_id,))
+        conn.commit()
+        conn.close()
+
+        u_data = get_user_data(target_u)
+
+        # User Text
+        user_txt = (
+            f"🎉 *WITHDRAWAL SUCCESSFUL!*\n\n"
+            f"🆔 *User ID:* `{target_u}`\n"
+            f"💸 *Withdraw Amount:* `{format_bal(amt)}`\n"
+            f"💰 *Remaining Balance:* `{format_bal(u_data['balance'])}`\n"
+            f"✅ *Status:* Approved & Paid"
+        )
+
+        # Proof Group Text
+        proof_txt = (
+            f"🔴 *WITHDRAWAL SUCCESS PROOF* 🔴\n\n"
+            f"🆔 *User ID:* `{target_u}`\n"
+            f"💸 *Amount Paid:* `{format_bal(amt)}`\n"
+            f"💰 *User Balance:* `{format_bal(u_data['balance'])}`\n"
+            f"⚡ *Status:* Approved ✅"
+        )
+
+        # Send Photo to User
+        try:
+            await context.bot.send_photo(chat_id=target_u, photo=photo_file_id, caption=user_txt, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error sending photo to user: {e}")
+
+        # Send Photo to Proof Channel
+        try:
+            await context.bot.send_photo(chat_id=PROOF_CHANNEL_ID, photo=photo_file_id, caption=proof_txt, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error sending photo to proof channel: {e}")
+
+        await update.message.reply_text("✅ *Withdrawal Approved! Proof Screenshot sent to User and Group!*", parse_mode="Markdown")
+        context.user_data.clear()
+        return
 
 # ---------------------------------------------------------
 # 7. MAIN ENTRYPOINT
