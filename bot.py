@@ -603,7 +603,7 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             amt = float(update.message.text.strip())
             if amt < 100:
-                await update.message.reply_text("❌ Minimum deposit amount is `100 Coins (1₹)`!", parse_mode="Markdown")
+                await update.message.reply_text("❌ Minimum deposit amount `100 Coins (1₹)` hai!", parse_mode="Markdown")
                 return
 
             context.user_data['dep_amount'] = amt
@@ -613,12 +613,13 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"💳 *DEPOSIT DETAILS*\n\n"
                 f"• Amount: `{format_bal(amt)}`\n"
                 f"• Send Money To UPI: `{UPI_ID}`\n\n"
-                f"📸 *Step 2:* Payment karne ke baad screenshot is chat me bhejein."
+                f"📸 *Step 2:* Payment karne ke baad screenshot (Photo) is chat me bhejein."
             )
             await update.message.reply_text(text, parse_mode="Markdown")
         except ValueError:
             await update.message.reply_text("❌ Valid number daalein (e.g. 100)!")
         return
+
 
     # 2. Deposit Step 2: Receive Screenshot
     if state == 'AWAITING_DEP_SCREENSHOT' and update.message.photo:
@@ -826,9 +827,72 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    
-    # Check if Admin is sending Withdrawal Proof Screenshot
-    if user.id == ADMIN_ID and context.user_data.get('admin_state') == 'AWAITING_WD_PROOF':
+    state = context.user_data.get('state')
+    admin_state = context.user_data.get('admin_state')
+
+    # ==================== 1. USER DEPOSIT SCREENSHOT HANDLER ====================
+    if state == 'AWAITING_DEP_SCREENSHOT':
+        amt = context.user_data.get('dep_amount', 100.0)
+        photo_id = update.message.photo[-1].file_id
+
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+
+            # Fail-safe missing columns check
+            try:
+                cursor.execute("ALTER TABLE requests ADD COLUMN details TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE requests ADD COLUMN status TEXT DEFAULT 'pending'")
+            except sqlite3.OperationalError:
+                pass
+
+            cursor.execute(
+                "INSERT INTO requests (user_id, type, amount, details, status) VALUES (?, 'dep', ?, 'screenshot', 'pending')",
+                (user.id, amt)
+            )
+            req_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+
+            # Admin Buttons for Deposit Request
+            admin_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("✅ Approve", callback_data=f"adm_app_dep_{req_id}"),
+                    InlineKeyboardButton("❌ Reject", callback_data=f"adm_rej_dep_{req_id}")
+                ]
+            ])
+
+            # Send Deposit Screenshot & Details to Admin
+            await context.bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=photo_id,
+                caption=(
+                    f"💳 *NEW DEPOSIT REQUEST*\n\n"
+                    f"🆔 *User ID:* `{user.id}` ({user.first_name})\n"
+                    f"💵 *Amount:* `{format_bal(amt)}`\n"
+                    f"📸 *Payment Screenshot Attached*"
+                ),
+                parse_mode="Markdown",
+                reply_markup=admin_kb
+            )
+
+            context.user_data.clear()
+            await update.message.reply_text(
+                "✅ *Deposit Screenshot sent to Admin for approval!*",
+                parse_mode="Markdown",
+                reply_markup=get_main_menu_keyboard()
+            )
+
+        except Exception as e:
+            print(f"Deposit Photo Error: {e}")
+            await update.message.reply_text(f"⚠️ *Deposit Error:* `{str(e)}`", parse_mode="Markdown")
+        return
+
+    # ==================== 2. ADMIN WITHDRAWAL PROOF SCREENSHOT HANDLER ====================
+    if user.id == ADMIN_ID and admin_state == 'AWAITING_WD_PROOF':
         req_id = context.user_data.get('wd_req_id')
         target_u = context.user_data.get('wd_target_u')
         amt = context.user_data.get('wd_amt')
