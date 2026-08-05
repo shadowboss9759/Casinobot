@@ -520,15 +520,37 @@ async def handle_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         await update.message.reply_text("✅ Screenshot sent to Admin for approval!", reply_markup=get_main_menu_keyboard())
         return
-
-    # 3. Withdraw Step 1: Input Amount
+        
+    # 3. Withdraw Step 1: Input Amount & Wager Check
     if state == 'AWAITING_WD_AMOUNT' and update.message.text:
         try:
             amt = float(update.message.text.strip())
-            bal = get_user_data(user.id)['balance']
+            u_data = get_user_data(user.id)
+            bal = u_data['balance']
+            w_req = u_data['wager_required']
+            w_done = u_data['wager_done']
 
-            if amt < 1000 or amt > 50000:
-                await update.message.reply_text("❌ Amount `1000 Coins (10₹)` se `50000 Coins (500₹)` ke beech hona chahiye!", parse_mode="Markdown")
+            # Calculate Remaining Wager
+            w_remaining = max(0.0, w_req - w_done)
+
+            # Check Wager Status
+            if w_remaining > 0:
+                progress_pct = min(100.0, (w_done / w_req) * 100) if w_req > 0 else 100
+                msg_txt = (
+                    f"🚫 *WITHDRAWAL LOCKED!*\n\n"
+                    f"Aapka Wager Requirement abhi baki hai.\n\n"
+                    f"📊 *Wager Status:*\n"
+                    f"• Target Wager: `{w_req:.1f} Coins`\n"
+                    f"• Completed: `{w_done:.1f} Coins` ({progress_pct:.1f}%)\n"
+                    f"• *Remaining Required:* `{w_remaining:.1f} Coins` ⚠️\n\n"
+                    f"💡 *Note:* Withdraw karne ke liye aapko `{w_remaining:.1f} Coins` ki aur bets khelni hongi!"
+                )
+                await update.message.reply_text(msg_txt, parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
+                context.user_data.clear()
+                return
+
+            if amt < 100:
+                await update.message.reply_text("❌ Minimum withdrawal amount `100 Coins (1₹)` hai!")
                 return
 
             if amt > bal:
