@@ -166,6 +166,33 @@ def update_stats(user_id: int, is_win: bool):
     conn.commit()
     conn.close()
 
+def update_wager_progress(user_id: int, bet_amount: float):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET wager_done = wager_done + ? WHERE user_id = ?", 
+        (bet_amount, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+def add_deposit_with_wager(user_id: int, deposit_amt: float):
+    bonus_amt = deposit_amt * 0.10  # 10% Extra Bonus
+    total_credit = deposit_amt + bonus_amt
+    
+    # Wager logic: Deposit ka 1x + Bonus ka 5x
+    added_wager = (deposit_amt * 1.0) + (bonus_amt * 5.0)
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET balance = balance + ?, wager_required = wager_required + ? WHERE user_id = ?",
+        (total_credit, added_wager, user_id)
+    )
+    conn.commit()
+    conn.close()
+    return total_credit, bonus_amt, added_wager
+
 # ---------------------------------------------------------
 # 2. KEYBOARDS
 # ---------------------------------------------------------
