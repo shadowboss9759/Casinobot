@@ -835,6 +835,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amt = context.user_data.get('dep_amount', 100.0)
         photo_id = update.message.photo[-1].file_id
 
+        # Clean User Name (Markdown Parse Error se bachne ke liye)
+        safe_name = user.first_name.replace('_', ' ').replace('*', '').replace('`', '') if user.first_name else "User"
+
         try:
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
@@ -871,7 +874,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 photo=photo_id,
                 caption=(
                     f"💳 *NEW DEPOSIT REQUEST*\n\n"
-                    f"🆔 *User ID:* `{user.id}` ({user.first_name})\n"
+                    f"🆔 *User ID:* `{user.id}` ({safe_name})\n"
                     f"💵 *Amount:* `{format_bal(amt)}`\n"
                     f"📸 *Payment Screenshot Attached*"
                 ),
@@ -890,6 +893,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Deposit Photo Error: {e}")
             await update.message.reply_text(f"⚠️ *Deposit Error:* `{str(e)}`", parse_mode="Markdown")
         return
+
 
     # ==================== 2. ADMIN WITHDRAWAL PROOF SCREENSHOT HANDLER ====================
     if user.id == ADMIN_ID and admin_state == 'AWAITING_WD_PROOF':
